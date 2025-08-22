@@ -4,7 +4,9 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
-
+// =========================
+// Generators & Datasource
+// =========================
 generator client {
   provider = "prisma-client-js"
 }
@@ -16,7 +18,7 @@ datasource db {
 }
 
 // =========================
-// Enums
+// Enums (gốc)
 // =========================
 enum UserStatus {
   ACTIVE
@@ -42,17 +44,38 @@ enum VerificationCodeType {
 }
 
 // =========================
+// Enums (domain giáo dục 1–1)
+// =========================
+enum LessonStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
+enum Weekday {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+// =========================
 // Auth Core
 // =========================
 model User {
   id          Int     @id @default(autoincrement())
-  email       String  @unique @db.VarChar(500) // (Có thể đổi sang @db.Citext nếu bật extension)
+  email       String  @unique @db.VarChar(500)
   name        String  @db.VarChar(500)
   password    String  @db.VarChar(500)
   phoneNumber String? @db.VarChar(50)
   avatar      String? @db.VarChar(1000)
 
-  // 2FA / các tác vụ bảo mật
+  // 2FA / bảo mật
   totpSecret String? @db.VarChar(1000)
 
   status  UserStatus @default(INACTIVE)
@@ -67,7 +90,7 @@ model User {
   // OTP / verification
   verificationCodes VerificationCode[]
 
-  // Audit (self-relations như ecom)
+  // Audit (self-relations)
   createdById  Int?
   createdBy    User?  @relation("CreatorUsers", fields: [createdById], references: [id], onDelete: SetNull, onUpdate: NoAction)
   createdUsers User[] @relation("CreatorUsers")
@@ -80,15 +103,39 @@ model User {
   deletedBy    User?  @relation("DeletorUsers", fields: [deletedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
   deletedUsers User[] @relation("DeletorUsers")
 
-  // Opposite relation fields for Permission model
-  createdPermissions Permission[] @relation("PermissionCreatedBy")
-  updatedPermissions Permission[] @relation("PermissionUpdatedBy")
-  deletedPermissions Permission[] @relation("PermissionDeletedBy")
+  // Opposite relation fields for Permission
+  permissionsCreated   Permission[] @relation("PermissionCreatedBy")
+  permissionsUpdated   Permission[] @relation("PermissionUpdatedBy")
+  permissionsDeleted   Permission[] @relation("PermissionDeletedBy")
 
-  // Opposite relation fields for Role model
-  createdRoles Role[] @relation("RoleCreatedBy")
-  updatedRoles Role[] @relation("RoleUpdatedBy")
-  deletedRoles Role[] @relation("RoleDeletedBy")
+  // Opposite relation fields for Role
+  rolesCreated   Role[] @relation("RoleCreatedBy")
+  rolesUpdated   Role[] @relation("RoleUpdatedBy")
+  rolesDeleted   Role[] @relation("RoleDeletedBy")
+
+  // Opposite relation field for TeacherProfile
+  teacherProfile TeacherProfile?
+
+  // Opposite relation fields for TeacherProfile audit
+  teacherProfilesCreated   TeacherProfile[] @relation("TeacherProfileCreatedBy")
+  teacherProfilesUpdated   TeacherProfile[] @relation("TeacherProfileUpdatedBy")
+  teacherProfilesDeleted   TeacherProfile[] @relation("TeacherProfileDeletedBy")
+
+  // Opposite relation field for Lesson as student
+  lessonsAsStudent Lesson[] @relation("StudentLessons")
+
+  // Opposite relation fields for Lesson audit
+  lessonsCreated   Lesson[] @relation("LessonCreatedBy")
+  lessonsUpdated   Lesson[] @relation("LessonUpdatedBy")
+  lessonsDeleted   Lesson[] @relation("LessonDeletedBy")
+
+  // Opposite relation fields for Package audit
+  packagesCreated   Package[] @relation("PackageCreatedBy")
+  packagesUpdated   Package[] @relation("PackageUpdatedBy")
+  packagesDeleted   Package[] @relation("PackageDeletedBy")
+
+  // Opposite relation field for StudentPackage
+  studentPackages   StudentPackage[]
 
   deletedAt DateTime?
   createdAt DateTime  @default(now())
@@ -112,8 +159,7 @@ model Device {
 }
 
 model RefreshToken {
-  // LƯU Ý: Đây là bản “giống ecom” của bạn: lưu token raw @unique.
-  // Best practice là lưu hash; nếu đổi sang hash, thay field này thành tokenHash và bỏ @unique.
+  // LƯU Ý: dạng raw token làm @id. Nếu chuyển sang hash, đổi trường & bỏ @unique.
   token     String   @id @db.VarChar(1000)
   userId    Int
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -132,7 +178,7 @@ model VerificationCode {
   type  VerificationCodeType
 
   userId   Int
-  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   expiresAt DateTime
   createdAt DateTime @default(now())
@@ -142,7 +188,7 @@ model VerificationCode {
 }
 
 // =========================
-// RBAC (theo đúng style ecom)
+// RBAC (theo style ecom)
 // =========================
 model Permission {
   id          Int        @id @default(autoincrement())
@@ -188,3 +234,178 @@ model Role {
 
   @@index([deletedAt])
 }
+
+// =========================
+// Domain giáo dục 1–1
+// =========================
+
+// Kỹ năng & mapping kỹ năng cho giáo viên
+model Skill {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique @db.VarChar(100) // e.g. "IELTS_SPEAKING"
+  name      String   @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teachers  TeacherSkill[]
+}
+
+model TeacherSkill {
+  // Join table TeacherProfile - Skill
+  teacherId Int
+  skillId   Int
+  level     Int      @default(3) // 1-5
+
+  teacher   TeacherProfile @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  skill     Skill          @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, skillId])
+}
+
+// Hồ sơ giáo viên
+model TeacherProfile {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  bio          String   @default("") @db.VarChar(2000)
+  hourlyRate   Decimal  @db.Decimal(10,2)
+  introVideo   String?  @db.VarChar(1000)
+  headline     String?  @db.VarChar(500)
+  timezone     String   @default("Asia/Ho_Chi_Minh") @db.VarChar(100)
+
+  skills       TeacherSkill[]
+  availRules   AvailabilityRule[]
+  lessonsAsTeacher Lesson[] @relation("TeacherLessons")
+  timeSlots   TimeSlot[]
+
+  ratingAvg    Float?
+  ratingCount  Int     @default(0)
+
+  createdById  Int?
+  createdBy    User?   @relation("TeacherProfileCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById  Int?
+  updatedBy    User?   @relation("TeacherProfileUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  deletedById  Int?
+  deletedBy    User?   @relation("TeacherProfileDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([deletedAt])
+}
+
+// Rule lịch rảnh hàng tuần (pattern)
+model AvailabilityRule {
+  id            Int             @id @default(autoincrement())
+  teacherId     Int
+  teacher       TeacherProfile  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  weekday       Weekday
+  startTimeMins Int             // phút từ 00:00 (theo timezone của giáo viên)
+  endTimeMins   Int             // exclusive
+  isActive      Boolean         @default(true)
+
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+// Slot cụ thể theo ngày để book
+model TimeSlot {
+  id          Int             @id @default(autoincrement())
+  teacherId   Int
+  teacher     TeacherProfile  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  startTime   DateTime
+  endTime     DateTime
+  isBooked    Boolean         @default(false)
+
+  // liên kết 1-1 tới lesson (nếu đã book)
+  lessonId    Int?            @unique
+  lesson      Lesson?         @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime        @default(now())
+
+  @@unique([teacherId, startTime, endTime])
+  @@index([startTime])
+  @@index([isBooked])
+}
+
+// Buổi học (lesson/booking)
+model Lesson {
+  id          Int           @id @default(autoincrement())
+  studentId   Int
+  teacherId   Int
+  startTime   DateTime
+  endTime     DateTime
+  isTrial     Boolean       @default(false)
+  status      LessonStatus  @default(PENDING)
+  notes       String?       @db.VarChar(2000)
+
+  student     User           @relation("StudentLessons", fields: [studentId], references: [id], onDelete: Cascade)
+  teacher     TeacherProfile @relation("TeacherLessons", fields: [teacherId], references: [id], onDelete: NoAction)
+
+  // liên kết ngược từ TimeSlot (TimeSlot.lessonId)
+  timeSlot    TimeSlot?
+
+  createdById Int?
+  createdBy   User?          @relation("LessonCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById Int?
+  updatedBy   User?          @relation("LessonUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  deletedById Int?
+  deletedBy   User?          @relation("LessonDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  deletedAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([teacherId, startTime])
+  @@index([studentId, startTime])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+// Gói học & sở hữu gói
+model Package {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(500)
+  description  String   @default("")
+  totalLessons Int
+  price        Decimal  @db.Decimal(10,2)
+  isActive     Boolean  @default(true)
+
+  createdById  Int?
+  createdBy    User? @relation("PackageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById  Int?
+  updatedBy    User? @relation("PackageUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  deletedById  Int?
+  deletedBy    User? @relation("PackageDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  // Opposite relation field for StudentPackage
+  studentPackages StudentPackage[]
+
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([deletedAt])
+}
+
+model StudentPackage {
+  id               Int      @id @default(autoincrement())
+  studentId        Int
+  packageId        Int
+  remainingLessons Int
+  purchasedAt      DateTime @default(now())
+
+  student   User    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  package   Package @relation(fields: [packageId], references: [id], onDelete: NoAction)
+
+  @@index([studentId])
+  @@index([packageId])
+}
+
+
+
+
